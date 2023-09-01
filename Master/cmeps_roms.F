@@ -675,7 +675,7 @@
 !-----------------------------------------------------------------------
 !
       IF (ESM_track) THEN
-        WRITE (trac,'(a,a,i0)') '==> Entering ROMS_SetServices',        &
+        WRITE (trac,'(a,a,i0)') '==> Entering ROMS_Create',             &
      &                          ', PET', PETrank
         FLUSH (trac)
       END IF
@@ -693,11 +693,8 @@
       END IF
 !
 !-----------------------------------------------------------------------
-!  Get ROMS standard input filename.  Then, inqure about the size of
-!  the 'Ngrids' parameter.
+!  Get ROMS standard input filename.  
 !-----------------------------------------------------------------------
-!
-!  Get ROMS standard input filename.
 !
      IF (YML%has('standard_input.OCN_component')) THEN
          IF (FoundError(yaml_get(YML, 'standard_input.OCN_component',    &
@@ -715,12 +712,9 @@
         RETURN
       END IF
 !
-!  Get size of number of nested grids, 'Ngrids' parameter from ROMS
-!  standard input file.
-!
-      CALL getpar_i (localPET, Ngrids, 'Ngrids', TRIM(Iname))
-!
+!-----------------------------------------------------------------------
 !  Get ROMS linked/coupled nested grid number for current application.
+!-----------------------------------------------------------------------
 !
       IF (YML%has('linked_grid')) THEN
         IF (FoundError(yaml_get(YML, 'linked_grid',                     &
@@ -1299,7 +1293,8 @@
 !
 !  Local variable declarations.
 !
-      integer :: i, ng
+      integer :: i
+      integer :: ng = 1
       integer :: MyComm, PETcount, localPET
 !
       TYPE (CouplingField), allocatable :: ROMSexport(:), ROMSimport(:)
@@ -1307,7 +1302,11 @@
       TYPE (yaml_tree)                  :: YML
 !
       character (len=240) :: StandardName, ShortName
-
+      character (len=240) :: cfgValue
+      character (len=160) :: message
+!
+      logical :: isPresent, isSet
+!
       character (len=*), parameter :: MyFile =                          &
      &  __FILE__//", ROMS_SetInitializeP1"
 !
@@ -1348,7 +1347,60 @@
      &                       file=MyFile)) THEN
         RETURN
       END IF
-      ESMcomm(Iroms)=MyComm
+!
+!-----------------------------------------------------------------------
+!  Query driver for attributes
+!-----------------------------------------------------------------------
+!
+      CALL NUOPC_CompAttributeGet(model,                                &
+     &                            name='CouplingConfig',                &
+     &                            value=cfgValue,                       &
+     &                            isPresent=isPresent,                  &
+     &                            isSet=isSet,                          &
+     &                            rc=rc)
+      IF (ESMF_LogFoundError(rcToCheck=rc,                              &
+     &                       msg=ESMF_LOGERR_PASSTHRU,                  &
+     &                       line=__LINE__,                             &
+     &                       file=MyFile)) THEN
+        RETURN
+      END IF
+!
+      IF (isPresent .and. isSet) THEN
+        CPLname = TRIM(cfgValue)
+        message='CouplingConfig = '//TRIM(CPLname)
+        CALL ESMF_LogWrite(TRIM(message), ESMF_LOGMSG_INFO)
+      ELSE
+        message='CouplingConfig needs to be provided: '//               &
+     &          'please check the top level ESMF config file.'
+        CALL ESMF_LogSetError (ESMF_FAILURE, rcToReturn=rc,             &
+     &                         msg=TRIM(message))
+        RETURN
+      END IF
+!
+      CALL NUOPC_CompAttributeGet(model,                                &
+     &                            name='Ngrids',                        &
+     &                            value=cfgValue,                       &
+     &                            isPresent=isPresent,                  &
+     &                            isSet=isSet,                          &
+     &                            rc=rc)
+      IF (ESMF_LogFoundError(rcToCheck=rc,                              &
+     &                       msg=ESMF_LOGERR_PASSTHRU,                  &
+     &                       line=__LINE__,                             &
+     &                       file=MyFile)) THEN
+        RETURN
+      END IF
+!
+      IF (isPresent .and. isSet) THEN
+        READ(cfgValue,*) Ngrids
+        WRITE(message, '(A,I2.2)') 'Ngrids = ', Ngrids
+        CALL ESMF_LogWrite(TRIM(message), ESMF_LOGMSG_INFO)
+      ELSE
+        message='Ngrids needs to be provided: '//                       &
+     &          'please check the top level ESMF config file.'
+        CALL ESMF_LogSetError (ESMF_FAILURE, rcToReturn=rc,             &
+     &                         msg=TRIM(message))
+        RETURN
+      END IF
 !
 !-----------------------------------------------------------------------
 !  Create, allocate, and populate module structures. The export and
@@ -1362,6 +1414,8 @@
      &                       file=MyFile)) THEN
         RETURN
       END IF
+!
+      ESMcomm(Iroms)=MyComm
 !
 !-----------------------------------------------------------------------
 !  Set ROMS Import State metadata.
