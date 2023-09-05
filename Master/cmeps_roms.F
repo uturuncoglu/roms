@@ -823,6 +823,10 @@
           RETURN
       END IF
 !
+      IF (.not.allocated(MODELS(Iroms)%grid)) THEN
+        allocate ( MODELS(Iroms)%grid(MODELS(Iroms)%Ngrids) )
+      END IF
+!
 !-----------------------------------------------------------------------
 !  Process export field(s) metadata from YAML object.
 !-----------------------------------------------------------------------
@@ -862,6 +866,10 @@
 !
         IF (.not.allocated(MODELS(Iroms)%ExportField)) THEN
           allocate ( MODELS(Iroms)%ExportField(Nexport(Iroms)) )
+        END IF
+!
+        IF (.not.allocated(MODELS(Iroms)%ExportState)) THEN
+          allocate ( MODELS(Iroms)%ExportState(MODELS(Iroms)%Ngrids) )
         END IF
 !
 !  Load export field(s) metadata.
@@ -1089,6 +1097,10 @@
 !
         IF (.not.allocated(MODELS(Iroms)%ImportField)) THEN
           allocate ( MODELS(Iroms)%ImportField(Nimport(Iroms)) )
+        END IF
+!
+        IF (.not.allocated(MODELS(Iroms)%ImportState)) THEN
+          allocate ( MODELS(Iroms)%ImportState(MODELS(Iroms)%Ngrids) )
         END IF
 !
 !  Load import field(s) metadata.
@@ -1684,6 +1696,10 @@
         IF (LocalPET.eq.0) THEN
           WRITE (cplout,10) 'ROMS Import STATE: ', linked_grid
         END IF
+!
+        ng = MODELS(Iroms)%Ngrids
+        MODELS(Iroms)%ImportState(ng) = ImportState
+!
         DO i=1,Nimport(Iroms)
           StandardName=MODELS(Iroms)%ImportField(i)%standard_name
           ShortName   =MODELS(Iroms)%ImportField(i)%short_name
@@ -1691,7 +1707,7 @@
             WRITE (cplout,20) 'Advertising Import Field: ',             &
      &                        TRIM(ShortName), TRIM(StandardName)
           END IF
-          CALL NUOPC_Advertise (ImportState,                            &
+          CALL NUOPC_Advertise (MODELS(Iroms)%ImportState(ng),          &
      &                          StandardName=TRIM(StandardName),        &
      &                          name=TRIM(ShortName),                   &
      &                          rc=rc)
@@ -1786,6 +1802,10 @@
         IF (LocalPET.eq.0) THEN
           WRITE (cplout,10) 'ROMS Export STATE: ', linked_grid
         END IF
+!
+        ng = MODELS(Iroms)%Ngrids
+        MODELS(Iroms)%ExportState(ng) = ExportState
+!
         DO i=1,Nexport(Iroms)
           StandardName=MODELS(Iroms)%ExportField(i)%standard_name
           ShortName   =MODELS(Iroms)%ExportField(i)%short_name
@@ -1793,7 +1813,7 @@
             WRITE (cplout,20) 'Advertising Export Field: ',             &
      &                        TRIM(ShortName), TRIM(StandardName)
           END IF
-          CALL NUOPC_Advertise (ExportState,                            &
+          CALL NUOPC_Advertise (MODELS(Iroms)%ExportState(ng),          &
      &                          StandardName=TRIM(StandardName),        &
      &                          name=TRIM(ShortName),                   &
      &                          rc=rc)
@@ -1849,7 +1869,9 @@
 !
       integer :: LBi, UBi, LBj, UBj
       integer :: MyComm
-      integer :: ng, localPET, PETcount, tile
+      integer :: ng, is, localPET, PETcount, tile
+      character (len= 20) :: TimeStartString
+      character (len= 20) :: TimeStopString
 !
       real (dp) :: driverDuration, romsDuration
 !
@@ -1857,7 +1879,7 @@
      &  __FILE__//", ROMS_SetInitializeP2"
 !
       TYPE (ESMF_TimeInterval) :: RunDuration, TimeStep
-      TYPE (ESMF_Time)         :: CurrTime, startTime
+      TYPE (ESMF_Time)         :: CurrTime, startTime, stopTime
       TYPE (ESMF_VM)           :: vm
 !
 !-----------------------------------------------------------------------
@@ -1872,7 +1894,7 @@
       rc=ESMF_SUCCESS
 !
 !-----------------------------------------------------------------------
-!  Querry the Virtual Machine (VM) parallel environmemt for the MPI
+!  Query the Virtual Machine (VM) parallel environmemt for the MPI
 !  communicator handle and current node rank.
 !-----------------------------------------------------------------------
 !
@@ -1939,16 +1961,12 @@
 # endif
 !
 !-----------------------------------------------------------------------
-!  Check ROMS simulation length and compare with that of the coupling
-!  driver.  We need to use the driver clock here since the ROMS
-!  component clock has been not created before this intialization
-!  phase.
+!  Query driver clock 
 !-----------------------------------------------------------------------
 !
       IF (MODELS(Iroms)%IsActive) THEN
         CALL NUOPC_ModelGet (model,                                     &
      &                       driverClock=ClockInfo(Idriver)%Clock,      &
-     &                       modelClock =ClockInfo(Iroms  )%Clock,      &
                              rc=rc)
         IF (ESMF_LogFoundError(rcToCheck=rc,                            &
      &                         msg=ESMF_LOGERR_PASSTHRU,                &
@@ -1958,6 +1976,8 @@
         END IF
 !
         CALL ESMF_ClockGet (ClockInfo(Idriver)%Clock,                   &
+     &                      startTime=startTime,                        &
+     &                      stopTime=stopTime,                          &
      &                      currTime=CurrTime,                          &
      &                      timeStep=TimeStep,                          &
      &                      runDuration=RunDuration,                    &
@@ -1968,6 +1988,41 @@
      &                         file=MyFile)) THEN
           RETURN
         END IF
+!
+        ClockInfo(Idriver)%TimeStep = TimeStep
+        ClockInfo(Idriver)%CurrentTime = CurrTime
+        ClockInfo(Idriver)%StartTime = StartTime
+        ClockInfo(Idriver)%StopTime = StopTime
+!
+        CALL ESMF_TimeGet (ClockInfo(Idriver)%StartTime,                &
+     &                     s_r8=ClockInfo(Idriver)%Time_Start,          &
+     &                     timeString=TimeStartString,                  &
+     &                     rc=rc)
+        IF (ESMF_LogFoundError(rcToCheck=rc,                            &
+     &                         msg=ESMF_LOGERR_PASSTHRU,                &
+     &                         line=__LINE__,                           &
+     &                         file=MyFile)) THEN
+          RETURN
+        END IF
+!
+        is=INDEX(TimeStartString, 'T')
+        IF (is.gt.0) TimeStartString(is:is)=' '
+        ClockInfo(Idriver)%Time_StartString=TRIM(TimeStartString)
+!
+        CALL ESMF_TimeGet (ClockInfo(Idriver)%StopTime,                 &
+     &                     s_r8=ClockInfo(Idriver)%Time_Stop,           &
+     &                     timeString=TimeStopString,                   &
+     &                     rc=rc)
+        IF (ESMF_LogFoundError(rcToCheck=rc,                            &
+     &                         msg=ESMF_LOGERR_PASSTHRU,                &
+     &                         line=__LINE__,                           &
+     &                         file=MyFile)) THEN
+          RETURN
+        END IF
+!
+        is=INDEX(TimeStopString, 'T')
+        IF (is.gt.0) TimeStopString(is:is)=' '
+        ClockInfo(Idriver)%Time_StopString=TRIM(TimeStopString)
 !
 # ifdef REGRESS_STARTCLOCK
         CALL ESMF_TimeIntervalGet (RunDuration-TimeStep,                &
@@ -2348,6 +2403,7 @@
           RETURN
         END IF
       END IF
+!
       ClockInfo(Iroms)%TimeStep=ClockInfo(Idriver)%TimeStep/TimeFrac
 !
 !-----------------------------------------------------------------------
