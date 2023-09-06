@@ -361,6 +361,8 @@
       integer :: cplout  = 77         ! coupling driver
       integer :: trac = 6             ! trace/track CALL sequence unit
 !
+      character (len=11), parameter :: CouplerLog = 'log.coupler'
+!
 !  Coupled model staggered grid-cell type indices:
 !
 !     Arakawa B-grid    Arakawa C-grid
@@ -1544,6 +1546,15 @@
      &                       line=__LINE__,                             &
      &                       file=MyFile)) THEN
         RETURN
+      END IF
+!
+!-----------------------------------------------------------------------
+!  Open standard output unit for ROMS cap information and messages.
+!-----------------------------------------------------------------------
+!
+      IF (localPET.eq.0) THEN
+        OPEN (cplout, FILE=TRIM(CouplerLog), FORM='formatted',          &
+     &        STATUS='replace')
       END IF
 !
 !-----------------------------------------------------------------------
@@ -4034,6 +4045,9 @@
       CALL ROMS_finalize
       FLUSH (stdout)                      ! flush standard output buffer
 !
+      FLUSH (cplout)
+      CLOSE (cplout)
+!
       IF (ESM_track) THEN
         WRITE (trac,'(a,a,i0)') '<== Exiting  ROMS_SetFinalize',        &
      &                          ', PET', PETrank
@@ -6096,7 +6110,7 @@
                 END DO
               END DO
 
-# if defined MASKING && defined WET_DRY
+# if defined CMEPS || defined MASKING
 !
 !  Update wet point land/sea mask, if differs from static mask.
 !
@@ -6106,12 +6120,16 @@
               DO j=JstrR,JendR
                 DO i=IstrR,IendR
                   IF (GRID(ng)%rmask(i,j).gt.0.0_r8) THEN
+# ifdef WET_DRY
                     IF (GRID(ng)%rmask(i,j).ne.                         &
      &                  GRID(ng)%rmask_wet(i,j)) THEN
                       ptr2d(i,j)=GRID(ng)%rmask_wet(i,j)
                     ELSE
                       ptr2d(i,j)=GRID(ng)%rmask(i,j)
                     END IF
+# else
+                    ptr2d(i,j)=GRID(ng)%rmask(i,j)
+# endif
                     MyFmin(1)=MIN(MyFmin(1),ptr2d(i,j))
                     MyFmax(1)=MAX(MyFmax(1),ptr2d(i,j))
                   END IF
