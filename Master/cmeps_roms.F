@@ -57,8 +57,7 @@
 !                            at the correct time.                      !
 !                                                                      !
 !    ROMS_SetGridArrays      Sets ROMS component staggered, horizontal !
-!                            grid arrays, grid area, and land/sea mask !
-!                            if any.                                   !
+!                            grid arrays, and land/sea mask if any.    !
 !                                                                      !
 !    ROMS_SetStates          Adds ROMS component export and import     !
 !                            fields into its respective state.         !
@@ -257,7 +256,6 @@
 
         real (r8), allocatable :: lon(:,:)       ! grid longitude
         real (r8), allocatable :: lat(:,:)       ! grid latitude
-        real (r8), allocatable :: area(:,:)      ! grid area
       END TYPE ESM_Mesh
 !
 !  Coupled models high-level object, [Nmodels].
@@ -2880,7 +2878,7 @@
 !
 !=======================================================================
 !                                                                      !
-!  Sets ROMS component staggered, horizontal grids arrays, grid area,  !
+!  Sets ROMS component staggered, horizontal grids arrays              !
 !  and land/sea mask, if any.                                          !
 !                                                                      !
 !=======================================================================
@@ -2904,7 +2902,6 @@
       integer, allocatable :: deBlockList(:,:,:)
       integer (i4b), pointer :: ptrM(:,:) => NULL()     ! land/sea mask
 !
-      real (dp), pointer :: ptrA(:,:) => NULL()         ! area
       real (dp), pointer :: ptrX(:,:) => NULL()         ! longitude
       real (dp), pointer :: ptrY(:,:) => NULL()         ! latitude
 !
@@ -3100,19 +3097,6 @@
         MODELS(Iroms)%SeaValue=1
 # endif
 !
-!  Allocate storage for grid area.
-!
-        CALL ESMF_GridAddItem (MODELS(Iroms)%grid(ng),                  &
-     &                         staggerLoc=staggerLoc,                   &
-     &                         itemflag=ESMF_GRIDITEM_AREA,             &
-     &                         rc=rc)
-        IF (ESMF_LogFoundError(rcToCheck=rc,                            &
-     &                         msg=ESMF_LOGERR_PASSTHRU,                &
-     &                         line=__LINE__,                           &
-     &                         file=MyFile)) THEN
-          RETURN
-        END IF
-!
 !  Get pointers and set coordinates for the grid.  Usually, the DO-loop
 !  is executed once since localDEcount=1.
 !
@@ -3156,19 +3140,6 @@
             RETURN
           END IF
 !
-          CALL ESMF_GridGetItem (MODELS(Iroms)%grid(ng),                &
-     &                           localDE=localDE,                       &
-     &                           staggerLoc=staggerLoc,                 &
-     &                           itemflag=ESMF_GRIDITEM_AREA,           &
-     &                           farrayPtr=ptrA,                        &
-     &                           rc=rc)
-          IF (ESMF_LogFoundError(rcToCheck=rc,                          &
-     &                           msg=ESMF_LOGERR_PASSTHRU,              &
-     &                           line=__LINE__,                         &
-     &                           file=MyFile)) THEN
-            RETURN
-          END IF
-!
 !  Fill grid pointers.
 !
           SELECT CASE (MODELS(Iroms)%mesh(ivar)%gtype)
@@ -3182,7 +3153,6 @@
 # else
                   ptrM(i,j)=1
 # endif
-                  ptrA(i,j)=GRID(ng)%om_r(i,j)*GRID(ng)%on_r(i,j)
                 END DO
               END DO
             CASE (Icorner)
@@ -3195,7 +3165,6 @@
 # else
                   ptrM(i,j)=1
 # endif
-                  ptrA(i,j)=GRID(ng)%om_p(i,j)*GRID(ng)%on_p(i,j)
                 END DO
               END DO
           END SELECT
@@ -3205,7 +3174,6 @@
           IF ( associated(ptrX) ) nullify (ptrX)
           IF ( associated(ptrY) ) nullify (ptrY)
           IF ( associated(ptrM) ) nullify (ptrM)
-          IF ( associated(ptrA) ) nullify (ptrA)
         END DO DE_LOOP
 !
 !  Debugging: write out component grid in VTK format.
