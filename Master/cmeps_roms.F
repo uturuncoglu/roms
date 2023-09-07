@@ -381,8 +381,6 @@
       integer, parameter :: Inan    = 0     ! unstaggered, cell center
       integer, parameter :: Icenter = 1     ! cell center
       integer, parameter :: Icorner = 2     ! cell corners
-      integer, parameter :: Iupoint = 3     ! right and left cell faces
-      integer, parameter :: Ivpoint = 4     ! upper and lower cell faces
 !
       character (len=6), dimension(0:4) :: GridType =                   &
      &                                     (/ 'N/A   ',                 &
@@ -986,10 +984,6 @@
                 MODELS(Iroms)%ExportField(i)%gtype=Icenter
               CASE ('corner_cell', 'cell_corner', 'corner')
                 MODELS(Iroms)%ExportField(i)%gtype=Icorner
-              CASE ('left_right_edge', 'right_left_edge', 'edge1')
-                MODELS(Iroms)%ExportField(i)%gtype=Iupoint
-              CASE ('lower_upper_edge', 'upper_lower_edge', 'edge2')
-                MODELS(Iroms)%ExportField(i)%gtype=Ivpoint
               CASE DEFAULT
                 MODELS(Iroms)%ExportField(i)%gtype=Icenter
             END SELECT
@@ -1217,10 +1211,6 @@
                 MODELS(Iroms)%ImportField(i)%gtype=Icenter
               CASE ('corner_cell', 'cell_corner', 'corner')
                 MODELS(Iroms)%ImportField(i)%gtype=Icorner
-              CASE ('left_right_edge', 'right_left_edge', 'edge1')
-                MODELS(Iroms)%ImportField(i)%gtype=Iupoint
-              CASE ('lower_upper_edge', 'upper_lower_edge', 'edge2')
-                MODELS(Iroms)%ImportField(i)%gtype=Ivpoint
               CASE DEFAULT
                 MODELS(Iroms)%ImportField(i)%gtype=Icenter
             END SELECT
@@ -3025,23 +3015,17 @@
 !
 !    Icenter:  RHO-point, cell center
 !    Icorner:  PSI-point, cell corners
-!    Iupoint:  U-point,   cell west/east sides
-!    Ivpoint:  V-point,   cell south/north sides
 !
       IF (.not.allocated(MODELS(Iroms)%mesh)) THEN
         allocate ( MODELS(Iroms)%mesh(4) )
         MODELS(Iroms)%mesh(1)%gtype=Icenter
         MODELS(Iroms)%mesh(2)%gtype=Icorner
-        MODELS(Iroms)%mesh(3)%gtype=Iupoint
-        MODELS(Iroms)%mesh(4)%gtype=Ivpoint
       END IF
 !
 !  Create ESMF Grid. The array indices are global following ROMS
 !  design.
 !
       MODELS(Iroms)%grid(ng)=ESMF_GridCreate(distgrid=distGrid,         &
-     &                                   gridEdgeLWidth=(/1,1/),        &
-     &                                   gridEdgeUWidth=(/1,1/),        &
      &                                   indexflag=ESMF_INDEX_GLOBAL,   &
      &                                   name=TRIM(MODELS(Iroms)%name), &
      &                                   rc=rc)
@@ -3075,19 +3059,11 @@
         SELECT CASE (MODELS(Iroms)%mesh(ivar)%gtype)
           CASE (Icenter)
             staggerLoc=ESMF_STAGGERLOC_CENTER
-            staggerEdgeLWidth=(/1,1/)
-            staggerEdgeUWidth=(/1,1/)
+            staggerEdgeLWidth=(/0,0/)
+            staggerEdgeUWidth=(/0,0/)
           CASE (Icorner)
             staggerLoc=ESMF_STAGGERLOC_CORNER
             staggerEdgeLWidth=(/0,0/)
-            staggerEdgeUWidth=(/1,1/)
-          CASE (Iupoint)
-            staggerLoc=ESMF_STAGGERLOC_EDGE1
-            staggerEdgeLWidth=(/0,1/)
-            staggerEdgeUWidth=(/1,1/)
-          CASE (Ivpoint)
-            staggerLoc=ESMF_STAGGERLOC_EDGE2
-            staggerEdgeLWidth=(/1,0/)
             staggerEdgeUWidth=(/1,1/)
         END SELECT
 !
@@ -3197,8 +3173,8 @@
 !
           SELECT CASE (MODELS(Iroms)%mesh(ivar)%gtype)
             CASE (Icenter)
-              DO j=JstrR,JendR
-                DO i=IstrR,IendR
+              DO j=Jstr,Jend
+                DO i=Istr,Iend
                   ptrX(i,j)=GRID(ng)%lonr(i,j)
                   ptrY(i,j)=GRID(ng)%latr(i,j)
 # ifdef MASKING
@@ -3210,8 +3186,8 @@
                 END DO
               END DO
             CASE (Icorner)
-              DO j=Jstr,Jend
-                DO i=Istr,Iend
+              DO j=Jstr,JendR
+                DO i=Istr,IendR
                   ptrX(i,j)=GRID(ng)%lonp(i,j)
                   ptrY(i,j)=GRID(ng)%latp(i,j)
 # ifdef MASKING
@@ -3220,32 +3196,6 @@
                   ptrM(i,j)=1
 # endif
                   ptrA(i,j)=GRID(ng)%om_p(i,j)*GRID(ng)%on_p(i,j)
-                END DO
-              END DO
-            CASE (Iupoint)
-              DO j=JstrR,JendR
-                DO i=Istr,IendR
-                  ptrX(i,j)=GRID(ng)%lonu(i,j)
-                  ptrY(i,j)=GRID(ng)%latu(i,j)
-# ifdef MASKING
-                  ptrM(i,j)=INT(GRID(ng)%umask(i,j))
-# else
-                  ptrM(i,j)=1
-# endif
-                  ptrA(i,j)=GRID(ng)%om_u(i,j)*GRID(ng)%on_u(i,j)
-                END DO
-              END DO
-            CASE (Ivpoint)
-              DO j=Jstr,JendR
-                DO i=IstrR,IendR
-                  ptrX(i,j)=GRID(ng)%lonv(i,j)
-                  ptrY(i,j)=GRID(ng)%latv(i,j)
-# ifdef MASKING
-                  ptrM(i,j)=INT(GRID(ng)%vmask(i,j))
-# else
-                  ptrM(i,j)=1
-# endif
-                  ptrA(i,j)=GRID(ng)%om_v(i,j)*GRID(ng)%on_v(i,j)
                 END DO
               END DO
           END SELECT
@@ -3325,9 +3275,6 @@
       integer :: id, ifld
       integer :: localDE, localDEcount, localPET
       integer :: ExportCount, ImportCount
-      integer :: staggerEdgeLWidth(2)
-      integer :: staggerEdgeUWidth(2)
-      integer :: haloLW(2), haloUW(2)
 !
       real (dp), dimension(:,:), pointer :: ptr2d => NULL()
 !
@@ -3354,15 +3301,6 @@
         FLUSH (trac)
       END IF
       rc=ESMF_SUCCESS
-!
-!-----------------------------------------------------------------------
-!  Compute lower and upper bounds tile halo widths for ESMF fields.
-!-----------------------------------------------------------------------
-!
-      haloLW(1)=BOUNDS(ng)%Istr(tile)-BOUNDS(ng)%LBi (tile)
-      haloLW(2)=BOUNDS(ng)%Jstr(tile)-BOUNDS(ng)%LBj (tile)
-      haloUW(1)=BOUNDS(ng)%UBi (tile)-BOUNDS(ng)%Iend(tile)
-      haloUW(2)=BOUNDS(ng)%UBj (tile)-BOUNDS(ng)%Jend(tile)
 !
 !-----------------------------------------------------------------------
 !  Query gridded component.
@@ -3457,20 +3395,8 @@
             SELECT CASE (MODELS(Iroms)%ExportField(id)%gtype)
               CASE (Icenter)                                ! RHO-points
                 staggerLoc=ESMF_STAGGERLOC_CENTER
-                staggerEdgeLWidth=(/1,1/)
-                staggerEdgeUWidth=(/1,1/)
               CASE (Icorner)                                ! PSI-points
                 staggerLoc=ESMF_STAGGERLOC_CORNER
-                staggerEdgeLWidth=(/0,0/)
-                staggerEdgeUWidth=(/1,1/)
-              CASE (Iupoint)                                ! U-points
-                staggerLoc=ESMF_STAGGERLOC_EDGE1
-                staggerEdgeLWidth=(/0,1/)
-                staggerEdgeUWidth=(/1,1/)
-              CASE (Ivpoint)                                ! V-points
-                staggerLoc=ESMF_STAGGERLOC_EDGE2
-                staggerEdgeLWidth=(/1,0/)
-                staggerEdgeUWidth=(/1,1/)
             END SELECT
 !
 !  Create 2D field from the Grid and arraySpec.
@@ -3479,8 +3405,6 @@
      &                             arraySpec2d,                         &
      &                             indexflag=ESMF_INDEX_GLOBAL,         &
      &                             staggerloc=staggerLoc,               &
-     &                             totalLWidth=haloLW,                  &
-     &                             totalUWidth=haloUW,                  &
      &                             name=TRIM(ExportNameList(ifld)),     &
      &                             rc=rc)
             IF (ESMF_LogFoundError(rcToCheck=rc,                        &
@@ -3603,31 +3527,17 @@
             SELECT CASE (MODELS(Iroms)%ImportField(id)%gtype)
               CASE (Icenter)                                ! RHO-points
                 staggerLoc=ESMF_STAGGERLOC_CENTER
-                staggerEdgeLWidth=(/1,1/)
-                staggerEdgeUWidth=(/1,1/)
               CASE (Icorner)                                ! PSI-points
                 staggerLoc=ESMF_STAGGERLOC_CORNER
-                staggerEdgeLWidth=(/0,0/)
-                staggerEdgeUWidth=(/1,1/)
-              CASE (Iupoint)                                ! U-points
-                staggerLoc=ESMF_STAGGERLOC_EDGE1
-                staggerEdgeLWidth=(/0,1/)
-                staggerEdgeUWidth=(/1,1/)
-              CASE (Ivpoint)                                ! V-points
-                staggerLoc=ESMF_STAGGERLOC_EDGE2
-                staggerEdgeLWidth=(/1,0/)
-                staggerEdgeUWidth=(/1,1/)
             END SELECT
 !
-!  Create 2D field from the Grid, arraySpec, total tile size including
-!  halos.  The array indices are global following ROMS design.
+!  Create 2D field from the Grid, arraySpec, total tile size
+!  The array indices are global following ROMS design.
 !
             field=ESMF_FieldCreate(MODELS(Iroms)%grid(ng),              &
      &                             arraySpec2d,                         &
      &                             indexflag=ESMF_INDEX_GLOBAL,         &
      &                             staggerloc=staggerLoc,               &
-     &                             totalLWidth=haloLW,                  &
-     &                             totalUWidth=haloUW,                  &
      &                             name=TRIM(ImportNameList(ifld)),     &
      &                             rc=rc)
             IF (ESMF_LogFoundError(rcToCheck=rc,                        &
