@@ -379,6 +379,8 @@
       integer, parameter :: Inan    = 0     ! unstaggered, cell center
       integer, parameter :: Icenter = 1     ! cell center
       integer, parameter :: Icorner = 2     ! cell corners
+      integer, parameter :: Iupoint = 3     ! right and left cell faces
+      integer, parameter :: Ivpoint = 4     ! upper and lower cell faces
 !
       character (len=6), dimension(0:4) :: GridType =                   &
      &                                     (/ 'N/A   ',                 &
@@ -982,6 +984,10 @@
                 MODELS(Iroms)%ExportField(i)%gtype=Icenter
               CASE ('corner_cell', 'cell_corner', 'corner')
                 MODELS(Iroms)%ExportField(i)%gtype=Icorner
+              CASE ('left_right_edge', 'right_left_edge', 'edge1')
+                MODELS(Iroms)%ExportField(i)%gtype=Iupoint
+              CASE ('lower_upper_edge', 'upper_lower_edge', 'edge2')
+                MODELS(Iroms)%ExportField(i)%gtype=Ivpoint
               CASE DEFAULT
                 MODELS(Iroms)%ExportField(i)%gtype=Icenter
             END SELECT
@@ -1209,6 +1215,10 @@
                 MODELS(Iroms)%ImportField(i)%gtype=Icenter
               CASE ('corner_cell', 'cell_corner', 'corner')
                 MODELS(Iroms)%ImportField(i)%gtype=Icorner
+              CASE ('left_right_edge', 'right_left_edge', 'edge1')
+                MODELS(Iroms)%ImportField(i)%gtype=Iupoint
+              CASE ('lower_upper_edge', 'upper_lower_edge', 'edge2')
+                MODELS(Iroms)%ImportField(i)%gtype=Ivpoint
               CASE DEFAULT
                 MODELS(Iroms)%ImportField(i)%gtype=Icenter
             END SELECT
@@ -2902,6 +2912,7 @@
       integer, allocatable :: deBlockList(:,:,:)
       integer (i4b), pointer :: ptrM(:,:) => NULL()     ! land/sea mask
 !
+      real (dp), pointer :: ptrA(:,:) => NULL()         ! area
       real (dp), pointer :: ptrX(:,:) => NULL()         ! longitude
       real (dp), pointer :: ptrY(:,:) => NULL()         ! latitude
 !
@@ -3012,17 +3023,23 @@
 !
 !    Icenter:  RHO-point, cell center
 !    Icorner:  PSI-point, cell corners
+!    Iupoint:  U-point,   cell west/east sides
+!    Ivpoint:  V-point,   cell south/north sides
 !
       IF (.not.allocated(MODELS(Iroms)%mesh)) THEN
         allocate ( MODELS(Iroms)%mesh(4) )
         MODELS(Iroms)%mesh(1)%gtype=Icenter
         MODELS(Iroms)%mesh(2)%gtype=Icorner
+        MODELS(Iroms)%mesh(3)%gtype=Iupoint
+        MODELS(Iroms)%mesh(4)%gtype=Ivpoint
       END IF
 !
 !  Create ESMF Grid. The array indices are global following ROMS
 !  design.
 !
       MODELS(Iroms)%grid(ng)=ESMF_GridCreate(distgrid=distGrid,         &
+     &                                   gridEdgeLWidth=(/2,2/),        &
+     &                                   gridEdgeUWidth=(/2,2/),        &
      &                                   indexflag=ESMF_INDEX_GLOBAL,   &
      &                                   name=TRIM(MODELS(Iroms)%name), &
      &                                   rc=rc)
@@ -3056,12 +3073,20 @@
         SELECT CASE (MODELS(Iroms)%mesh(ivar)%gtype)
           CASE (Icenter)
             staggerLoc=ESMF_STAGGERLOC_CENTER
-            staggerEdgeLWidth=(/0,0/)
-            staggerEdgeUWidth=(/0,0/)
+            staggerEdgeLWidth=(/1,1/)
+            staggerEdgeUWidth=(/1,1/)
           CASE (Icorner)
             staggerLoc=ESMF_STAGGERLOC_CORNER
-            staggerEdgeLWidth=(/0,0/)
-            staggerEdgeUWidth=(/1,1/)
+            staggerEdgeLWidth=(/1,1/)
+            staggerEdgeUWidth=(/2,2/)
+          CASE (Iupoint)
+            staggerLoc=ESMF_STAGGERLOC_EDGE1
+            staggerEdgeLWidth=(/1,1/)
+            staggerEdgeUWidth=(/2,1/)
+          CASE (Ivpoint)
+            staggerLoc=ESMF_STAGGERLOC_EDGE2
+            staggerEdgeLWidth=(/1,1/)
+            staggerEdgeUWidth=(/1,2/)
         END SELECT
 !
 !  Allocate coordinate storage associated with staggered grid type.
@@ -3096,6 +3121,19 @@
         MODELS(Iroms)%LandValue=0
         MODELS(Iroms)%SeaValue=1
 # endif
+!
+!  Allocate storage for grid area.
+!
+        CALL ESMF_GridAddItem (MODELS(Iroms)%grid(ng),                  &
+     &                         staggerLoc=staggerLoc,                   &
+     &                         itemflag=ESMF_GRIDITEM_AREA,             &
+     &                         rc=rc)
+        IF (ESMF_LogFoundError(rcToCheck=rc,                            &
+     &                         msg=ESMF_LOGERR_PASSTHRU,                &
+     &                         line=__LINE__,                           &
+     &                         file=MyFile)) THEN
+          RETURN
+        END IF
 !
 !  Get pointers and set coordinates for the grid.  Usually, the DO-loop
 !  is executed once since localDEcount=1.
@@ -3140,12 +3178,25 @@
             RETURN
           END IF
 !
+          CALL ESMF_GridGetItem (MODELS(Iroms)%grid(ng),                &
+     &                           localDE=localDE,                       &
+     &                           staggerLoc=staggerLoc,                 &
+     &                           itemflag=ESMF_GRIDITEM_AREA,           &
+     &                           farrayPtr=ptrA,                        &
+     &                           rc=rc)
+          IF (ESMF_LogFoundError(rcToCheck=rc,                          &
+     &                           msg=ESMF_LOGERR_PASSTHRU,              &
+     &                           line=__LINE__,                         &
+     &                           file=MyFile)) THEN
+            RETURN
+          END IF
+!
 !  Fill grid pointers.
 !
           SELECT CASE (MODELS(Iroms)%mesh(ivar)%gtype)
             CASE (Icenter)
-              DO j=Jstr,Jend
-                DO i=Istr,Iend
+              DO j=JstrR,JendR
+                DO i=IstrR,IendR
                   ptrX(i,j)=GRID(ng)%lonr(i,j)
                   ptrY(i,j)=GRID(ng)%latr(i,j)
 # ifdef MASKING
@@ -3153,11 +3204,12 @@
 # else
                   ptrM(i,j)=1
 # endif
+                  ptrA(i,j)=GRID(ng)%om_r(i,j)*GRID(ng)%on_r(i,j)
                 END DO
               END DO
             CASE (Icorner)
-              DO j=Jstr,JendR
-                DO i=Istr,IendR
+              DO j=JstrR,JendR
+                DO i=IstrR,IendR
                   ptrX(i,j)=GRID(ng)%lonp(i,j)
                   ptrY(i,j)=GRID(ng)%latp(i,j)
 # ifdef MASKING
@@ -3165,8 +3217,107 @@
 # else
                   ptrM(i,j)=1
 # endif
+                  ptrA(i,j)=GRID(ng)%om_p(i,j)*GRID(ng)%on_p(i,j)
                 END DO
               END DO
+!
+! Extapolate corner points at bottom edge
+!
+              IF (tile < NtileI(ng)) THEN
+                ptrX(:,Jstr-1)=2.0_dp*ptrX(:,Jstr)-ptrX(:,Jstr+1)
+                ptrY(:,Jstr-1)=2.0_dp*ptrY(:,Jstr)-ptrY(:,Jstr+1)
+                ptrM(:,Jstr-1)=ptrM(:,Jstr)
+                ptrA(:,Jstr-1)=ptrA(:,Jstr)
+              END IF
+!
+! Extapolate corner points at left edge
+!
+              IF (mod(tile,NtileI(ng)) == 0) THEN
+                ptrX(Istr-1,:)=2.0_dp*ptrX(Istr,:)-ptrX(Istr+1,:)
+                ptrY(Istr-1,:)=2.0_dp*ptrY(Istr,:)-ptrY(Istr+1,:)
+                ptrM(Istr-1,:)=ptrM(Istr,:)
+                ptrA(Istr-1,:)=ptrA(Istr,:)
+              END IF
+!
+! Extapolate corner points at top edge
+!
+              IF (tile >= NtileI(ng)*(NtileJ(ng)-1)) THEN
+                ptrX(:,Jend+2)=2.0_dp*ptrX(:,Jend+1)-ptrX(:,Jend)
+                ptrY(:,Jend+2)=2.0_dp*ptrY(:,Jend+1)-ptrY(:,Jend)
+                ptrM(:,Jend+2)=ptrM(:,Jend+1)
+                ptrA(:,Jend+2)=ptrA(:,Jend+1)
+              END IF
+!
+! Extapolate corner points at right edge
+!
+              IF (mod(tile+1,NtileI(ng)) == 0) THEN
+                ptrX(Iend+2,:)=2.0_dp*ptrX(Iend+1,:)-ptrX(Iend,:)
+                ptrY(Iend+2,:)=2.0_dp*ptrY(Iend+1,:)-ptrY(Iend,:)
+                ptrM(Iend+2,:)=ptrM(Iend+1,:)
+                ptrA(Iend+2,:)=ptrA(Iend+1,:)
+              END IF
+            CASE (Iupoint)
+              DO j=JstrR,JendR
+                DO i=Istr,IendR
+                  ptrX(i,j)=GRID(ng)%lonu(i,j)
+                  ptrY(i,j)=GRID(ng)%latu(i,j)
+# ifdef MASKING
+                  ptrM(i,j)=INT(GRID(ng)%umask(i,j))
+# else
+                  ptrM(i,j)=1
+# endif
+                  ptrA(i,j)=GRID(ng)%om_u(i,j)*GRID(ng)%on_u(i,j)
+                END DO
+              END DO
+!
+! Extapolate u points at left edge
+!
+              IF (mod(tile,NtileI(ng)) == 0) THEN
+                ptrX(Istr-1,:)=2.0_dp*ptrX(Istr,:)-ptrX(Istr+1,:)
+                ptrY(Istr-1,:)=2.0_dp*ptrY(Istr,:)-ptrY(Istr+1,:)
+                ptrM(Istr-1,:)=ptrM(Istr,:)
+                ptrA(Istr-1,:)=ptrA(Istr,:)
+              END IF
+!
+! Extapolate u points at right edge
+!
+              IF (mod(tile+1,NtileI(ng)) == 0) THEN
+                ptrX(Iend+2,:)=2.0_dp*ptrX(Iend+1,:)-ptrX(Iend,:)
+                ptrY(Iend+2,:)=2.0_dp*ptrY(Iend+1,:)-ptrY(Iend,:)
+                ptrM(Iend+2,:)=ptrM(Iend+1,:)
+                ptrA(Iend+2,:)=ptrA(Iend+1,:)
+              END IF
+            CASE (Ivpoint)
+              DO j=Jstr,JendR
+                DO i=IstrR,IendR
+                  ptrX(i,j)=GRID(ng)%lonv(i,j)
+                  ptrY(i,j)=GRID(ng)%latv(i,j)
+# ifdef MASKING
+                  ptrM(i,j)=INT(GRID(ng)%vmask(i,j))
+# else
+                  ptrM(i,j)=1
+# endif
+                  ptrA(i,j)=GRID(ng)%om_v(i,j)*GRID(ng)%on_v(i,j)
+                END DO
+              END DO
+!
+! Extapolate v points at bottom edge
+!
+              IF (tile < NtileI(ng)) THEN
+                ptrX(:,Jstr-1)=2.0_dp*ptrX(:,Jstr)-ptrX(:,Jstr+1)
+                ptrY(:,Jstr-1)=2.0_dp*ptrY(:,Jstr)-ptrY(:,Jstr+1)
+                ptrM(:,Jstr-1)=ptrM(:,Jstr)
+                ptrA(:,Jstr-1)=ptrA(:,Jstr)
+              END IF
+!
+! Extapolate v points at top edge
+!
+              IF (tile >= NtileI(ng)*(NtileJ(ng)-1)) THEN
+                ptrX(:,Jend+2)=2.0_dp*ptrX(:,Jend+1)-ptrX(:,Jend)
+                ptrY(:,Jend+2)=2.0_dp*ptrY(:,Jend+1)-ptrY(:,Jend)
+                ptrM(:,Jend+2)=ptrM(:,Jend+1)
+                ptrA(:,Jend+2)=ptrA(:,Jend+1)
+              END IF
           END SELECT
 !
 !  Nullify pointers.
@@ -3174,6 +3325,7 @@
           IF ( associated(ptrX) ) nullify (ptrX)
           IF ( associated(ptrY) ) nullify (ptrY)
           IF ( associated(ptrM) ) nullify (ptrM)
+          IF ( associated(ptrA) ) nullify (ptrA)
         END DO DE_LOOP
 !
 !  Debugging: write out component grid in VTK format.
@@ -3365,6 +3517,10 @@
                 staggerLoc=ESMF_STAGGERLOC_CENTER
               CASE (Icorner)                                ! PSI-points
                 staggerLoc=ESMF_STAGGERLOC_CORNER
+              CASE (Iupoint)                                ! U-points
+                staggerLoc=ESMF_STAGGERLOC_EDGE1
+              CASE (Ivpoint)                                ! V-points
+                staggerLoc=ESMF_STAGGERLOC_EDGE2
             END SELECT
 !
 !  Create 2D field from the Grid and arraySpec.
