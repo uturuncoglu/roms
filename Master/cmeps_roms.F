@@ -1995,6 +1995,7 @@
 !
       TYPE (ESMF_TimeInterval) :: RunDuration, TimeStep
       TYPE (ESMF_Time)         :: CurrTime, startTime, stopTime
+      TYPE (ESMF_CalKind_Flag) :: calkindflag
       TYPE (ESMF_VM)           :: vm
 !
 !-----------------------------------------------------------------------
@@ -2095,6 +2096,7 @@
      &                      stopTime=stopTime,                          &
      &                      currTime=CurrTime,                          &
      &                      timeStep=TimeStep,                          &
+     &                      calkindflag=calkindflag,                    &
      &                      runDuration=RunDuration,                    &
      &                      rc=rc)
         IF (ESMF_LogFoundError(rcToCheck=rc,                            &
@@ -2108,6 +2110,12 @@
         ClockInfo(Idriver)%CurrentTime = CurrTime
         ClockInfo(Idriver)%StartTime = StartTime
         ClockInfo(Idriver)%StopTime = StopTime
+!
+        IF (calkindflag == ESMF_CALKIND_GREGORIAN) THEN
+          ClockInfo(Idriver)%CalendarString = 'gregorian'
+        ELSE IF (calkindflag == ESMF_CALKIND_360DAY) THEN
+          ClockInfo(Idriver)%CalendarString = '360_day'
+        END IF
 !
         CALL ESMF_TimeGet (ClockInfo(Idriver)%StartTime,                &
      &                     s_r8=ClockInfo(Idriver)%Time_Start,          &
@@ -2163,7 +2171,7 @@
 !
         DO ng=1,MODELS(Iroms)%Ngrids
           IF (ANY(COUPLED(Iroms)%LinkedGrid(ng,:))) THEN
-            romsDuration=(ntend(ng)-ntfirst(ng)+1)*dt(ng)
+            romsDuration=(ntend(ng)-ntfirst(ng))*dt(ng)
             IF (romsDuration.ne.driverDuration) THEN
               IF (localPET.eq.0) THEN
                 WRITE (cplout,10) romsDuration, driverDuration,         &
@@ -2377,15 +2385,19 @@
 !  Calendar that extends backward the dates preceeding 15 October 1582
 !  which always have a year length of 365.2425 days.
 !
+!  Using driver provided calendar since UFS Weather Model does not
+!  support Proleptic Gregorian Calendar 
+!
       ref_year  =Rclock%year
       ref_month =Rclock%month
       ref_day   =Rclock%day
       ref_hour  =Rclock%hour
       ref_minute=Rclock%minutes
       ref_second=Rclock%seconds
-      Calendar  =TRIM(Rclock%calendar)
+      Calendar  =TRIM(ClockInfo(Idriver)%CalendarString)
+      ClockInfo(Iroms)%CalendarString = TRIM(Calendar)
 !
-      IF (INT(time_ref).eq.-1) THEN
+      IF (ClockInfo(Iroms)%CalendarString == '360_day') THEN
         CalType=ESMF_CALKIND_360DAY
       ELSE
         CalType=ESMF_CALKIND_GREGORIAN

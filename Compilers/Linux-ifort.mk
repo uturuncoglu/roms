@@ -255,7 +255,7 @@ ifdef USE_MCT
 endif
 
 ifdef USE_ESMF
-                     include $(ESMFMKFILE)
+          include $(ESMFMKFILE)
           ESMF_OS ?= $(OS)
       ESMF_SUBDIR := $(ESMF_OS).$(ESMF_COMPILER).$(ESMF_ABI).$(ESMF_COMM).$(ESMF_SITE)
       ESMF_MK_DIR ?= $(ESMF_DIR)/lib/lib$(ESMF_BOPT)/$(ESMF_SUBDIR)
